@@ -1,0 +1,8 @@
+  # receive events from the document that control multiple cursors
+  def hook_document(self):
+    self.add_handler(self.doc, 'delete-range', self.schedule_delete)
+    self.add_handler(self.doc, 'insert-text', self.schedule_insert)
+    self.add_handler(self.doc, 'end-user-action', self.apply_scheduled)
+  # stop receiving events from the document when there are no extra cursors
+  def unhook_document(self):
+    self.remove_handlers(self.doc)

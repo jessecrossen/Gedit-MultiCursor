@@ -8,11 +8,11 @@ Installing
 
 By cloning the repo:
 
-    $ git clone git@github.com:jessecrossen/Gedit-MultiCursor.git
+    $ git clone https://github.com/jessecrossen/Gedit-MultiCursor.git
     $ cd Gedit-MultiCursor
     $ ./install.sh
     
-By unpacking a snapshot:
+Or by unpacking a snapshot if don't use git:
 
     $ wget https://github.com/jessecrossen/Gedit-MultiCursor/archive/master.zip
     $ unzip master.zip
@@ -32,7 +32,7 @@ Then re-run install.sh and try again from there.
 Configuration
 =============
 
-There's no configuration UI yet, but it would be great if someone handier than me with Gtk would write one! You can change the keyboard shortcuts by editing the strings at the top of multicursor.py. Sorry if you liked using **Control-d** to delete a line, but it should be pretty easy to change if you want to.
+There's no configuration UI yet, but it would be great if someone handier than me with Gtk would write one! Sorry if you liked using **Control-d** to delete a line, but it should be pretty easy to change if you want to. You can change the keyboard shortcuts by editing the strings at the top of multicursor.py.
 
 Usage
 =====

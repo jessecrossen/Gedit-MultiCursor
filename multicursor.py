@@ -118,7 +118,7 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
     # wrap around
     if ((match is None) and (search_start.get_offset() > end.get_offset())):
       search_end = start
-      search_start = doc.get_start_iter()
+      search_start = self.doc.get_start_iter()
       match = self.get_next_match(text, search_start, search_end)
     if (match is not None):
       self.add_cursor(match[0], match[1])

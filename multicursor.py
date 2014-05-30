@@ -328,7 +328,10 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
     #  insert local clipboard contents for each cursor
     if ((self._handled_paste) and (text == self.clipboard)):
       for cursor in self.cursors:
-        cursor.insert(start_delta, cursor.clipboard)
+        if ((cursor.clipboard is not None) and (len(cursor.clipboard) > 0)):
+          cursor.insert(start_delta, cursor.clipboard)
+        else:
+          cursor.insert(start_delta, text)
     else:
       for cursor in self.cursors:
         cursor.insert(start_delta, text)

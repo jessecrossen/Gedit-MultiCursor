@@ -25,6 +25,7 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
     # map keyboard shortcuts
     self.keymap = {
       '<Primary>d': self.match_cursor,
+      '<Primary><Shift>d': self.match_cursor_fuzzy,
       '<Primary>u': self.unmatch_cursor,
       '<Primary>Up': self.column_select_up,
       '<Primary>Down': self.column_select_down,
@@ -119,8 +120,11 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
     start = self.doc.get_iter_at_mark(self.doc.get_insert())
     end = self.doc.get_iter_at_mark(self.doc.get_selection_bound())
     return((start, end))
-    
-  def match_cursor(self):
+  
+  # add a cursor at the next instance of the selected text
+  def match_cursor_fuzzy(self):
+    self.match_cursor(fuzzy=True)
+  def match_cursor(self, fuzzy=False):
     (start, end) = self.order_iters(self.get_selection_iters())
     text = self.doc.get_text(start, end, True)
     if (len(text) == 0):
@@ -128,27 +132,28 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
     if (len(self.cursors) > 0):
       search_start = self.cursors[-1].get_end_iter()
     else:
-      self.tag_all_matches(text)
+      self.tag_all_matches(text, fuzzy)
       search_start = end
     if (search_start.get_offset() < start.get_offset()):
       search_end = start
     else:
       search_end = None
-    match = self.get_next_match(text, search_start, search_end)
+    match = self.get_next_match(text, search_start, search_end, fuzzy)
     # wrap around
     if ((match is None) and (search_start.get_offset() > end.get_offset())):
       search_end = start
       search_start = self.doc.get_start_iter()
-      match = self.get_next_match(text, search_start, search_end)
+      match = self.get_next_match(text, search_start, search_end, fuzzy)
     if (match is not None):
       self.add_cursor(match[0], match[1])
       self.cursors[-1].scroll_onscreen()
   
-  def tag_all_matches(self, text):
+  # highlight all text that matches the selected text
+  def tag_all_matches(self, text, fuzzy):
     (sel_start, sel_end) = self.order_iters(self.get_selection_iters())
     start_iter = self.doc.get_start_iter()
     while (True):
-      match = self.get_next_match(text, start_iter, None)
+      match = self.get_next_match(text, start_iter, None, fuzzy)
       if (match is None):
         break
       start_iter = match[1]
@@ -162,8 +167,11 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
       match.remove()
     self.matches = [ ]
 
-  def get_next_match(self, text, search_start, search_end):
-    return(search_start.forward_search(text, 0, search_end))
+  def get_next_match(self, text, search_start, search_end, fuzzy):
+    flags = 0
+    if (fuzzy):
+      flags = Gtk.TextSearchFlags.CASE_INSENSITIVE
+    return(search_start.forward_search(text, flags, search_end))
   
   def unmatch_cursor(self):
     self.remove_cursor(-1)

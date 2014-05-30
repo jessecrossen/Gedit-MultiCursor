@@ -8,14 +8,14 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
     GObject.Object.__init__(self)
     # handlers we've created so we can disconnect them
     self._handlers = [ ]
-    self._handling = False
+    # whether we're inside a user action block
+    self._in_user_action = False
     # a list of functions to run when the user action is complete
-    self._scheduled = [ ]
-    # data about the last position of the cursor
-    self._handled_cursor_move = False
-    self._last_cursor_offsets = None
+    self._user_actions = [ ]
     # whether a paste has just happened
     self._handled_paste = False
+    # the current undo stack level
+    self.undo_level = 0
     # the contents of the clipboard on the last copy/cut operation
     self.clipboard = ''
     # a list of cursors besides the document cursor
@@ -54,16 +54,19 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
     self.add_handler(self.view, 'copy-clipboard', self.mc_save_clipboard)
     self.add_handler(self.view, 'cut-clipboard', self.mc_save_clipboard)
     self.add_handler(self.view, 'paste-clipboard', self.mc_paste_clipboard)
+    self.add_handler(self.view, 'undo', self.undo)
+    self.add_handler(self.view, 'redo', self.redo)
+    self.add_handler(self.view, 'undo', self.undo_after, 'after')
+    self.add_handler(self.view, 'redo', self.redo_after, 'after')
   def do_deactivate(self):
     self.remove_handlers()
 
   # receive events from the document that control multiple cursors
   def hook_document(self):
-    self.add_handler(self.doc, 'delete-range', self.schedule_delete)
-    self.add_handler(self.doc, 'insert-text', self.schedule_insert)
-    self.add_handler(self.doc, 'begin-user-action', self.clear_schedule)
-    self.add_handler(self.doc, 'end-user-action', self.apply_scheduled, 'after')
-    self.add_handler(self.doc, 'cursor-moved', self.cursor_moved)
+    self.add_handler(self.doc, 'delete-range', self.delete)
+    self.add_handler(self.doc, 'insert-text', self.insert)
+    self.add_handler(self.doc, 'begin-user-action', self.begin_user_action)
+    self.add_handler(self.doc, 'end-user-action', self.end_user_action, 'after')
     
   # stop receiving events from the document when there are no extra cursors
   def unhook_document(self):
@@ -181,7 +184,7 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
     else:
       self.view.scroll_mark_onscreen(self.doc.get_insert())
   
-  # extend the cursor to the in a column to previous and subsequent lines
+  # extend the cursor in a column to previous or subsequent lines
   def column_select_up(self):
     self.column_select(-1)
   def column_select_down(self):
@@ -222,11 +225,16 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
     if (start_iter.get_line() != start_line):
       self.add_cursor(start_iter, end_iter)
   
+  # add another cursor at the given position
   def add_cursor(self, start_iter, end_iter):
     if (len(self.cursors) == 0):
       self.hook_document()
-    self.cursors.append(Cursor(self.view, start_iter, end_iter))
+      self.undo_level = 0
+    cursor = Cursor(self.view, start_iter, end_iter)
+    self.cursors.append(cursor)
+    cursor.save_state(self.undo_level)
 
+  # remove the cursor with the given index
   def remove_cursor(self, index):
     if (len(self.cursors) > 0):
       self.cursors[index].remove()
@@ -234,50 +242,85 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
       if (len(self.cursors) == 0):
         self.unhook_document()
 
+  # remove all cursors
   def clear_cursors(self):
     if (len(self.cursors) > 0):
       while (len(self.cursors) > 0):
         self.remove_cursor(-1)
       self.clear_matches()
+      
+  # restore cursor state after undo and redo operations
+  def undo(self, view):
+    undo_manager = self.doc.get_undo_manager()
+    self._can_undo = undo_manager.can_undo()
+  def redo(self, view):
+    undo_manager = self.doc.get_undo_manager()
+    self._can_redo = undo_manager.can_redo()
+  def undo_after(self, view):
+    if (not self._can_undo): return
+    self.undo_level -= 1
+    keep_cursors = [ ]
+    for cursor in self.cursors:
+      # remove cursors if we go back past the point where they were created
+      if (self.undo_level < cursor.initial_state_index):
+        cursor.remove()
+      else:
+        cursor.recall_state(self.undo_level)
+        keep_cursors.append(cursor)
+    self.cursors = keep_cursors
+  def redo_after(self, view):
+    if (not self._can_redo): return
+    self.undo_level += 1
+    for cursor in self.cursors:
+      cursor.recall_state(self.undo_level)
   
   # schedule a multicursor insert for when the user's action is done
-  def schedule_insert(self, doc, start, text, length):
-    if (self._handling): return
-    # get the offset from the insertion point
-    (sel_start, sel_end) = self.order_iters(self.get_selection_iters())
-    start_delta = start.get_offset() - sel_start.get_offset()
-    # schedule this for when the user action is done
-    self.schedule(self.mc_insert, (start_delta, text))
+  def insert(self, doc, start, text, length):
+    # if this is part of a user action, store and apply it at the end
+    if (self._in_user_action):
+      # get the offset from the insertion point
+      (sel_start, sel_end) = self.order_iters(self.get_selection_iters())
+      start_delta = start.get_offset() - sel_start.get_offset()
+      # schedule this for when the user action is done
+      self.store_user_action(self.mc_insert, (start_delta, text))
 
   # schedule a multicursor delete for when the user's action is done
-  def schedule_delete(self, doc, start, end):
-    if (self._handling): return
-    # get the offset of the range from the insertion point
-    (start, end) = self.order_iters((start, end))
-    (sel_start, sel_end) = self.order_iters(self.get_selection_iters())
-    start_delta = start.get_offset() - sel_start.get_offset()
-    end_delta = end.get_offset() - sel_end.get_offset()
-    # schedule this for when the user action is done
-    self.schedule(self.mc_delete, (start_delta, end_delta))
+  def delete(self, doc, start, end):
+    # if this is part of a user action, store and apply it at the end
+    if (self._in_user_action):
+      # get the offset of the range from the insertion point
+      (start, end) = self.order_iters((start, end))
+      (sel_start, sel_end) = self.order_iters(self.get_selection_iters())
+      start_delta = start.get_offset() - sel_start.get_offset()
+      end_delta = end.get_offset() - sel_end.get_offset()
+      # schedule this for when the user action is done
+      self.store_user_action(self.mc_delete, (start_delta, end_delta))
 
   # clear the schedule of functions to be applied
-  def clear_schedule(self, doc=None):
-    self._scheduled = [ ]
-  # schedule a function to be run when apply_scheduled is called
-  def schedule(self, action, args):
-    if (self._handling): return
-    self._scheduled.append((action, args))
+  def begin_user_action(self, doc=None):
+    # save the state of all the cursors before the user does something
+    for cursor in self.cursors:
+      cursor.save_state(self.undo_level)
+    self._user_actions = [ ]
+    self._in_user_action = True
+  # schedule a function to be run when end_user_action is called
+  def store_user_action(self, action, args):
+    if (self._in_user_action):
+      self._user_actions.append((action, args))
   # run scheduled functions
-  def apply_scheduled(self, doc=None):
-    if (self._handling): return
-    self._handling = True
+  def end_user_action(self, doc=None):
+    self._in_user_action = False
     # remove all match previews now that the user is doing something
     self.clear_matches()
     # execute the scheduled actions
-    for (action, args) in self._scheduled:
+    for (action, args) in self._user_actions:
       action(*args)
-    self._handling = False
-    self.clear_schedule()
+    self._user_actions = [ ]
+    # save the state of all the cursors after the user does something
+    self.undo_level += 1
+    for cursor in self.cursors:
+      cursor.save_state(self.undo_level)
+    
 
   # insert text at every cursor
   def mc_insert(self, start_delta, text):
@@ -309,28 +352,6 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
       return
     for cursor in self.cursors:
       cursor.move(step_size, count, extend_selection)
-    # if we've handled a cursor movement here, set a flag to skip the next 
-    #  cursor-moved signal so we don't handle it twice
-    self._handled_cursor_move = True
-
-  # detect when the selection changes length without the user extending 
-  #  the selection, as happens during a redo operation
-  def cursor_moved(self, doc):
-    if (self._handled_cursor_move):
-      self._handled_cursor_move = False
-      return
-    # see how much the cursor has moved since last time
-    (start, end) = self.order_iters(self.get_selection_iters())
-    offsets = (start.get_offset(), end.get_offset())
-    last = self._last_cursor_offsets
-    if (last is not None):
-      delta = (offsets[0] - last[0], offsets[1] - last[1])
-      # see if the two ends of the cursor have moved differently
-      if ((delta[0] != 0) and (delta[0] != delta[1])):
-        for cursor in self.cursors:
-          cursor.tag.do_move_marks()
-    # store the current offsets for next time
-    self._last_cursor_offsets = offsets
     
   # copy the selection at every cursor
   def mc_save_clipboard(self, view):
@@ -355,6 +376,9 @@ class Cursor:
     self.tag = MarkTag(self.view, 'multicursor', start_iter, end_iter)
     # make a clipboard local to this cursor
     self.clipboard = ''
+    # make a place to save state for undo operations
+    self.state = dict()
+    self.initial_state_index = None
 
   # get an iter at the beginning of the selected area
   def get_start_iter(self):
@@ -376,6 +400,23 @@ class Cursor:
   # save the text to the local clipboard
   def save_text(self):
     self.clipboard = self.get_text()
+    
+  # save state at the given index
+  def save_state(self, index):
+    self.state[index] = {
+      'start': self.get_start_iter().get_offset(),
+      'end': self.get_end_iter().get_offset()
+    }
+    if (self.initial_state_index is None):
+      self.initial_state_index = index
+  # recall the state at the given index
+  def recall_state(self, index):
+    if (index not in self.state):
+      return
+    state = self.state[index]
+    start_iter = self.doc.get_iter_at_offset(state['start'])
+    end_iter = self.doc.get_iter_at_offset(state['end'])
+    self.tag.do_move_marks(start_iter, end_iter)
 
   # scroll so that this cursor is on-screen
   def scroll_onscreen(self):
@@ -521,6 +562,7 @@ class MarkTag:
       self.doc.delete_mark(self.start_mark)
       self.start_mark = self.doc.create_mark(None, start_iter, capture)
       self.start_mark.set_visible(visible)
+      
       
   # remove the tag and marks from the document
   def remove(self):

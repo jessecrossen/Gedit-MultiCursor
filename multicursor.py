@@ -24,8 +24,10 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
     self.matches = [ ]
     # map keyboard shortcuts
     self.keymap = {
-      '<Control>d': self.match_cursor,
-      '<Control>u': self.unmatch_cursor,
+      '<Primary>d': self.match_cursor,
+      '<Primary>u': self.unmatch_cursor,
+      '<Primary>Up': self.column_select_up,
+      '<Primary>Down': self.column_select_down,
       'Escape': self.clear_cursors
     }
     self.compile_keymap()
@@ -170,6 +172,47 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
       self.cursors[-1].scroll_onscreen()
     else:
       self.view.scroll_mark_onscreen(self.doc.get_insert())
+  
+  # extend the cursor to the in a column to previous and subsequent lines
+  def column_select_up(self):
+    self.column_select(-1)
+  def column_select_down(self):
+    self.column_select(1)
+  def column_select(self, line_delta):
+    # get the lines of the first and last cursor
+    (sel_start, sel_end) = self.order_iters(self.get_selection_iters())
+    sel_line = sel_start.get_line()
+    min_line = sel_line
+    max_line = sel_line
+    for cursor in self.cursors:
+      line = cursor.get_start_iter().get_line()
+      min_line = min(line, min_line)
+      max_line = max(max_line, line)
+    # expand up or down
+    start_line = None
+    if ((line_delta < 0) and (max_line == sel_line)):
+      start_line = min_line
+    elif ((line_delta > 0) and (min_line == sel_line)):
+      start_line = max_line
+    # if the user is going in the opposite direction from before, remove matches
+    if (start_line is None):
+      self.unmatch_cursor()
+      return
+    # copy the position of the selection so the offset holds even when crossing
+    #  incomplete or empty lines
+    line = start_line + line_delta
+    start_iter = sel_start.copy()
+    start_iter.set_line(line)
+    start_iter.forward_to_line_end()
+    start_iter.set_line_offset(min(sel_start.get_line_offset(), start_iter.get_line_offset()))
+    end_iter = sel_end.copy()
+    end_iter.set_line(line + (sel_end.get_line() - sel_start.get_line()))
+    end_iter.forward_to_line_end()
+    end_iter.set_line_offset(min(sel_end.get_line_offset(), end_iter.get_line_offset()))
+    # add a cursor as long as we're actually on a different line, meaning we haven't hit
+    #  the start or end of the document yet
+    if (start_iter.get_line() != start_line):
+      self.add_cursor(start_iter, end_iter)
   
   def add_cursor(self, start_iter, end_iter):
     if (len(self.cursors) == 0):

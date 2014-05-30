@@ -37,14 +37,22 @@ There's no configuration UI yet, but it would be great if someone handier than m
 Usage
 =====
 
-You can add a cursor by selecting some text and using the **Control-d** shortcut. All instances of that text will be highlighted, and the next one will get a cursor around it. Use **Control-u** to remove the last cursor you added. Start typing, move the cursor, or delete to modify the text at all the current cursors. You can also add cursors anywhere by clicking while holding down the **Control** key. Use **Escape** or click anywhere to go back to one cursor. If you have different text selected with multiple cursors, you can use cut/copy/paste and each cursor will maintain its own clipboard, which can be used along with cursor movement commands to do some fairly complex refactoring jobs.
+You can add a cursor by selecting some text and using the **Control-d** shortcut. All instances of that text will be highlighted, and the next one will get a cursor around it. Use **Control-u** to remove the last cursor you added. Start typing, move the cursor, or delete to modify the text at all the current cursors.
+
+Use Control-Up and Control-Down to select text in above and below the current selection. This allows you to quickly select text in columns, like tabular data or repetitive lines of code.
+
+You can also add cursors anywhere by clicking while holding down the **Control** key.
+
+If you have different text selected with multiple cursors, you can use cut/copy/paste and each cursor will maintain its own clipboard, which can be used along with cursor movement commands (like Control-Left, Control-Right, Home, End, and so on) to do some fairly complex refactoring jobs.
+
+Use **Escape** or click anywhere to return to just the normal cursor.
+
 
 Shortcomings
 ============
 
 * As mentioned above, there's not an easy way to configure the plugin.
 * All matching is case sensitive right now. I'm working on that plus an even cooler feature relating to casing conventions. Stay tuned.
-* Column selection mode isn't supported yet.
 * The extra cursors don't blink like the main one. Maybe it's a feature?
 
 

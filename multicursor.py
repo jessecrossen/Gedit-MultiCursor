@@ -6,9 +6,18 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
   
   def __init__(self):
     GObject.Object.__init__(self)
+    # handlers we've created so we can disconnect them
     self._handlers = [ ]
     self._handling = False
+    # a list of functions to run when the user action is complete
     self._scheduled = [ ]
+    # data about the last position of the cursor
+    self._handled_cursor_move = False
+    self._last_cursor_offsets = None
+    # whether a paste has just happened
+    self._handled_paste = False
+    # the contents of the clipboard on the last copy/cut operation
+    self.clipboard = ''
     # a list of cursors besides the document cursor
     self.cursors = [ ]
     # a list of tags around all instances of the matched selection text
@@ -39,6 +48,9 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
     # bind events
     self.add_handler(self.view, 'event', self.on_event)
     self.add_handler(self.view, 'move-cursor', self.mc_move_cursor)
+    self.add_handler(self.view, 'copy-clipboard', self.mc_save_clipboard)
+    self.add_handler(self.view, 'cut-clipboard', self.mc_save_clipboard)
+    self.add_handler(self.view, 'paste-clipboard', self.mc_paste_clipboard)
   def do_deactivate(self):
     self.remove_handlers()
 
@@ -46,14 +58,20 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
   def hook_document(self):
     self.add_handler(self.doc, 'delete-range', self.schedule_delete)
     self.add_handler(self.doc, 'insert-text', self.schedule_insert)
-    self.add_handler(self.doc, 'end-user-action', self.apply_scheduled)
+    self.add_handler(self.doc, 'begin-user-action', self.clear_schedule)
+    self.add_handler(self.doc, 'end-user-action', self.apply_scheduled, 'after')
+    self.add_handler(self.doc, 'cursor-moved', self.cursor_moved)
+    
   # stop receiving events from the document when there are no extra cursors
   def unhook_document(self):
     self.remove_handlers(self.doc)
 
   # add a signal handler for the given object
-  def add_handler(self, obj, signal, handler):
-    self._handlers.append((obj, obj.connect(signal, handler)))
+  def add_handler(self, obj, signal, handler, when=None):
+    if (when == 'after'):
+      self._handlers.append((obj, obj.connect_after(signal, handler)))
+    else:
+      self._handlers.append((obj, obj.connect(signal, handler)))
   # remove handlers for the given object, 
   #  or all handlers if no object is passed
   def remove_handlers(self, remove_obj=None):
@@ -72,7 +90,7 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
       if (event.get_state()[1] & Gdk.ModifierType.CONTROL_MASK):
         (b, x, y) = event.get_coords()
         (x, y) = view.window_to_buffer_coords(Gtk.TextWindowType.TEXT, x, y)
-        (pos, b) = view.get_iter_at_position(x, y)
+        pos = view.get_iter_at_location(x, y)
         self.add_cursor(pos, pos)
         return(True)
       else:
@@ -173,6 +191,7 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
   
   # schedule a multicursor insert for when the user's action is done
   def schedule_insert(self, doc, start, text, length):
+    if (self._handling): return
     # get the offset from the insertion point
     (sel_start, sel_end) = self.order_iters(self.get_selection_iters())
     start_delta = start.get_offset() - sel_start.get_offset()
@@ -181,6 +200,7 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
 
   # schedule a multicursor delete for when the user's action is done
   def schedule_delete(self, doc, start, end):
+    if (self._handling): return
     # get the offset of the range from the insertion point
     (start, end) = self.order_iters((start, end))
     (sel_start, sel_end) = self.order_iters(self.get_selection_iters())
@@ -189,28 +209,37 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
     # schedule this for when the user action is done
     self.schedule(self.mc_delete, (start_delta, end_delta))
 
+  # clear the schedule of functions to be applied
+  def clear_schedule(self, doc=None):
+    self._scheduled = [ ]
   # schedule a function to be run when apply_scheduled is called
   def schedule(self, action, args):
     if (self._handling): return
     self._scheduled.append((action, args))
   # run scheduled functions
-  def apply_scheduled(self, doc):
+  def apply_scheduled(self, doc=None):
     if (self._handling): return
     self._handling = True
     # remove all match previews now that the user is doing something
     self.clear_matches()
     # execute the scheduled actions
-    self.doc.begin_user_action()
     for (action, args) in self._scheduled:
       action(*args)
-    self.doc.end_user_action()
     self._handling = False
-    self._scheduled = [ ]
+    self.clear_schedule()
 
   # insert text at every cursor
   def mc_insert(self, start_delta, text):
-    for cursor in self.cursors:
-      cursor.insert(start_delta, text)
+    # if a paste was just handled and we're inserting the global clipboard contents,
+    #  insert local clipboard contents for each cursor
+    if ((self._handled_paste) and (text == self.clipboard)):
+      for cursor in self.cursors:
+        cursor.insert(start_delta, cursor.clipboard)
+    else:
+      for cursor in self.cursors:
+        cursor.insert(start_delta, text)
+    # any paste action has resulted in an insertion, so clear for next time
+    self._handled_paste = False
 
   # delete text at every cursor
   def mc_delete(self, start_delta, end_delta):
@@ -218,6 +247,7 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
     for cursor in self.cursors:
       cursor.delete(start_delta, end_delta)
 
+  # move every cursor
   def mc_move_cursor(self, view, step_size, count, extend_selection):
     # remove all match previews now that the user is doing something
     self.clear_matches()
@@ -228,9 +258,39 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
       return
     for cursor in self.cursors:
       cursor.move(step_size, count, extend_selection)
+    # if we've handled a cursor movement here, set a flag to skip the next 
+    #  cursor-moved signal so we don't handle it twice
+    self._handled_cursor_move = True
 
-
-
+  # detect when the selection changes length without the user extending 
+  #  the selection, as happens during a redo operation
+  def cursor_moved(self, doc):
+    if (self._handled_cursor_move):
+      self._handled_cursor_move = False
+      return
+    # see how much the cursor has moved since last time
+    (start, end) = self.order_iters(self.get_selection_iters())
+    offsets = (start.get_offset(), end.get_offset())
+    last = self._last_cursor_offsets
+    if (last is not None):
+      delta = (offsets[0] - last[0], offsets[1] - last[1])
+      # see if the two ends of the cursor have moved differently
+      if ((delta[0] != 0) and (delta[0] != delta[1])):
+        for cursor in self.cursors:
+          cursor.tag.do_move_marks()
+    # store the current offsets for next time
+    self._last_cursor_offsets = offsets
+    
+  # copy the selection at every cursor
+  def mc_save_clipboard(self, view):
+    (sel_start, sel_end) = self.order_iters(self.get_selection_iters())
+    self.clipboard = self.doc.get_text(sel_start, sel_end, True)
+    # save the global clipboard so we can tell when it's being pasted
+    for cursor in self.cursors:
+      cursor.save_text()
+      
+  def mc_paste_clipboard(self, view):
+    self._handled_paste = True
 
 
 # this class manages a single extra cursor in the document
@@ -242,6 +302,8 @@ class Cursor:
     self.doc = self.view.get_buffer()
     # add marks for the cursor and selection area
     self.tag = MarkTag(self.view, 'multicursor', start_iter, end_iter)
+    # make a clipboard local to this cursor
+    self.clipboard = ''
 
   # get an iter at the beginning of the selected area
   def get_start_iter(self):
@@ -255,6 +317,14 @@ class Cursor:
   def get_length(self):
     return(self.get_end_iter().get_offset() - 
            self.get_start_iter().get_offset())
+           
+  # get the text between the start and end_delta
+  def get_text(self):
+    return(self.doc.get_text(self.get_start_iter(), self.get_end_iter(), True))
+    
+  # save the text to the local clipboard
+  def save_text(self):
+    self.clipboard = self.get_text()
 
   # scroll so that this cursor is on-screen
   def scroll_onscreen(self):
@@ -268,7 +338,9 @@ class Cursor:
   def insert(self, start_delta, text):
     start_iter = self.doc.get_iter_at_offset(
       self.get_start_iter().get_offset() + start_delta)
+    self.tag.set_capturing_gravity(False)
     self.doc.insert(start_iter, text)
+    self.tag.set_capturing_gravity(True)
 
   # delete text at the cursor
   def delete(self, start_delta, end_delta):
@@ -359,7 +431,7 @@ class MarkTag:
     self.view = view
     self.doc = self.view.get_buffer()
     self.name = name
-    self.start_mark = self.doc.create_mark(None, start_iter, False)
+    self.start_mark = self.doc.create_mark(None, start_iter, True)
     self.end_mark = self.doc.create_mark(None, end_iter, False)
     # update the tag for its initial position
     self.do_move_marks()
@@ -386,20 +458,19 @@ class MarkTag:
     end_iter = self.doc.get_iter_at_mark(self.end_mark)
     if (start_iter.get_offset() != end_iter.get_offset()):
       self.add_tag()
-      # make sure the start mark has left gravity so it tracks the 
-      #  edge of the tag
-      if (not self.start_mark.get_left_gravity()):
-        self.doc.delete_mark(self.start_mark)
-        self.start_mark = self.doc.create_mark(None, start_iter, True)
       self.start_mark.set_visible(False)
     else:
-      # make sure the start mark has right gravity so text will be inserted
-      #  before it
-      if (self.start_mark.get_left_gravity()):
-        self.doc.delete_mark(self.start_mark)
-        self.start_mark = self.doc.create_mark(None, start_iter, False)
       self.start_mark.set_visible(True)
 
+  # set whether the tag captures text inserted between it or not
+  def set_capturing_gravity(self, capture):
+    if (self.start_mark.get_left_gravity() != capture):
+      start_iter = self.doc.get_iter_at_mark(self.start_mark)
+      visible = self.start_mark.get_visible()
+      self.doc.delete_mark(self.start_mark)
+      self.start_mark = self.doc.create_mark(None, start_iter, capture)
+      self.start_mark.set_visible(visible)
+      
   # remove the tag and marks from the document
   def remove(self):
     self.start_mark.set_visible(False)

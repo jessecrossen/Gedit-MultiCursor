@@ -37,12 +37,11 @@ There's no configuration UI yet, but it would be great if someone handier than m
 Usage
 =====
 
-You can add a cursor by selecting some text and using the **Control-d** shortcut. All instances of that text will be highlighted, and the next one will get a cursor around it. Use **Control-u** to remove the last cursor you added. Start typing, move the cursor, or delete to modify the text at all the current cursors. You can also add cursors anywhere by clicking while holding down the **Control** key. Use **Escape** or click anywhere to go back to one cursor.
+You can add a cursor by selecting some text and using the **Control-d** shortcut. All instances of that text will be highlighted, and the next one will get a cursor around it. Use **Control-u** to remove the last cursor you added. Start typing, move the cursor, or delete to modify the text at all the current cursors. You can also add cursors anywhere by clicking while holding down the **Control** key. Use **Escape** or click anywhere to go back to one cursor. If you have different text selected with multiple cursors, you can use cut/copy/paste and each cursor will maintain its own clipboard, which can be used along with cursor movement commands to do some fairly complex refactoring jobs.
 
 Shortcomings
 ============
 
-* Support for undo is fairly bad, and will actually mess up your document. I'm working on understanding gedit's undo system better so I can improve on that.
 * As mentioned above, there's not an easy way to configure the plugin.
 * All matching is case sensitive right now. I'm working on that plus an even cooler feature relating to casing conventions. Stay tuned.
 * Column selection mode isn't supported yet.

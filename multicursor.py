@@ -272,8 +272,10 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
     if (len(self.cursors) == 0):
       self.hook_document()
       self.undo_level = 0
+    # add the cursor
     cursor = Cursor(self.view, start_iter, end_iter)
     self.cursors.append(cursor)
+    # save its initial state for the undo stack
     cursor.save_state(self.undo_level)
 
   # remove the cursor with the given index
@@ -667,6 +669,9 @@ class MarkTag:
       start_iter = self.doc.get_iter_at_mark(self.start_mark)
       end_iter = self.doc.get_iter_at_mark(self.end_mark)
       self.doc.apply_tag(tag, start_iter, end_iter)
+    # remove search match tags on the cursor to avoid visual tag collision
+    if (self.name == 'multicursor'):
+      self.doc.remove_tag_by_name('found', start_iter, end_iter)
 
   # remove the tag from between the marks if there is one
   def remove_tag(self):
@@ -677,6 +682,7 @@ class MarkTag:
 
   # get a styled tag to place between the marks
   def get_tag(self):
+    # see if we already have this tag
     tag = self.doc.get_tag_table().lookup(self.name)
     if (tag is None):
       # style the selection part of a cursor
@@ -759,7 +765,7 @@ class Casing:
   # return whether the detected casing looks like a keyword
   def is_keyword(self):
     return((self.case is not None) or (self.separator is not None))
-    
+  
   # detect the casing convention for the given string and return an instance
   #  with all properties set to the detected values or None if the text was
   #  indeterminate in some way (e.g. you can't detect a separator from a single word)

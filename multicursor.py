@@ -253,11 +253,13 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
     line = start_line + line_delta
     start_iter = sel_start.copy()
     start_iter.set_line(line)
-    start_iter.forward_to_line_end()
+    if (not start_iter.ends_line()):
+      start_iter.forward_to_line_end()
     start_iter.set_line_offset(min(sel_start.get_line_offset(), start_iter.get_line_offset()))
     end_iter = sel_end.copy()
     end_iter.set_line(line + (sel_end.get_line() - sel_start.get_line()))
-    end_iter.forward_to_line_end()
+    if (not end_iter.ends_line()):
+      end_iter.forward_to_line_end()
     end_iter.set_line_offset(min(sel_end.get_line_offset(), end_iter.get_line_offset()))
     # add a cursor as long as we're actually on a different line, meaning we haven't hit
     #  the start or end of the document yet
@@ -443,6 +445,8 @@ class Cursor:
     self.casing = None
     # make a clipboard local to this cursor
     self.clipboard = ''
+    # safe the offset within the line for when the cursor crosses empty lines
+    self.line_offset = None
     # make a place to save state for undo operations
     self.state = dict()
     self.initial_state_index = None
@@ -524,6 +528,10 @@ class Cursor:
         end_iter = start_iter.copy()
       else:
         start_iter = end_iter.copy()
+      if ((step_size != Gtk.MovementStep.LOGICAL_POSITIONS) and
+          (step_size != Gtk.MovementStep.VISUAL_POSITIONS)):
+        self.move_iter(start_iter, step_size, count)
+        self.move_iter(end_iter, step_size, count)
     else:
       self.move_iter(start_iter, step_size, count)
       self.move_iter(end_iter, step_size, count)
@@ -545,12 +553,14 @@ class Cursor:
       else:
         pos.forward_word_ends(abs(count))
     elif (step_size == Gtk.MovementStep.DISPLAY_LINES):
-      offset = pos.get_line_offset()
-      if (count < 0):
-        pos.backward_visible_lines(abs(count))
-      else:
-        pos.forward_visible_lines(abs(count))
-      pos.set_line_offset(offset)
+      if (self.line_offset is None):
+        self.line_offset = pos.get_line_offset()
+      pos.set_line_offset(0)
+      pos.set_line(pos.get_line() + count)
+      if (not pos.ends_line()):
+        pos.forward_to_line_end()
+      if (pos.get_line_offset() > 0):
+        pos.set_line_offset(min(self.line_offset, pos.get_line_offset()))
     elif (step_size == Gtk.MovementStep.PARAGRAPHS):
       if (count < 0):
         pos.backward_visible_lines(abs(count))
@@ -564,6 +574,9 @@ class Cursor:
         pos.set_line_offset(0)
       else:
         pos.forward_to_line_end()
+    # clear the stored line offset if the cursor moves horizontally
+    if (step_size != Gtk.MovementStep.DISPLAY_LINES):
+      self.line_offset = None
 
 
 

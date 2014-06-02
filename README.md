@@ -37,7 +37,9 @@ There's no configuration UI yet, but it would be great if someone handier than m
 Usage
 =====
 
-You can add a cursor by selecting some text and using the **Control-d** shortcut. All instances of that text will be highlighted, and the next one will get a cursor around it. If you want to match without case sensitivity, use **Control-Shift-d** instead. Use **Control-u** to remove the last cursor you added. Start typing, move the cursor, or delete to modify the text at all the current cursors.
+You can add a cursor by selecting some text and using the **Control-d** shortcut. All instances of that text will be highlighted, and the next one will get a cursor around it. Use **Control-u** to remove the last cursor you added. Start typing, move the cursor, or delete to modify the text at all the current cursors.
+
+If you want to match the selection without case sensitivity, use **Control-Shift-d**. If the selected text is keyword-like (made up of alphanumerics, dashes, and underscores), this will also enable fuzzy matching, where "myVariable" will match "MY_VARIABLE", "my-variable", and so on. When you start typing, any cursors that matched text with a different casing convention will retain that casing convention as much as possible for whatever text you enter. This makes it easy to quickly refactor a bunch of related keywords, like a constant, a private variable, and a property that all refer to the same thing.
 
 Use **Control-Up** and **Control-Down** to select text above and below the current selection. This allows you to quickly select text in columns, like tabular data or repetitive lines of code.
 

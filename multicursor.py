@@ -674,7 +674,9 @@ class MarkTag:
       self.doc.apply_tag(tag, start_iter, end_iter)
     # remove search match tags on the cursor to avoid visual tag collision
     if (self.name == 'multicursor'):
-      self.doc.remove_tag_by_name('found', start_iter, end_iter)
+      found_tag = self.doc.get_tag_table().lookup('found')
+      if (found_tag):
+        self.doc.remove_tag_by_name('found', start_iter, end_iter)
 
   # remove the tag from between the marks if there is one
   def remove_tag(self):
@@ -823,4 +825,8 @@ class Casing:
     if ((self.separator == '') and (self.case == 'case')):
       words = list(words)
       words[1:] = map(lambda s: s.capitalize(), words[1:])
-    return(self.prefix+self.separator.join(words)+self.suffix)
+    if (self.separator is not None):
+      inner = self.separator.join(words)
+    else:
+      inner = ''.join(words)
+    return(self.prefix+inner+self.suffix)

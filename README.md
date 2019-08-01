@@ -6,33 +6,32 @@ A plugin for gedit 3+ that adds multiple cursor support as popularized by [Subli
 Installing
 ==========
 
-By cloning the repo:
+1. clone the repo:
 
-    $ git clone https://github.com/jessecrossen/Gedit-MultiCursor.git
-    $ cd Gedit-MultiCursor
-    $ ./install.sh
+        git clone https://github.com/jessecrossen/Gedit-MultiCursor.git
+        cd Gedit-MultiCursor
+        ./install.sh
     
-Or by unpacking a snapshot if don't use git:
+    or unpack a snapshot if don't use git:
 
-    $ wget https://github.com/jessecrossen/Gedit-MultiCursor/archive/master.zip
-    $ unzip master.zip
-    $ cd Gedit-MultiCursor-master
-    $ ./install.sh
+        wget https://github.com/jessecrossen/Gedit-MultiCursor/archive/master.zip
+        unzip master.zip
+        cd Gedit-MultiCursor-master
+        ./install.sh
 
-Then restart gedit from the console and enable the MultiCursor plugin in the preferences dialog. If you see something like this in your console output:
+2. restart gedit from the console
 
-    (gedit:4579): libpeas-WARNING **: Could not find loader 'python3' for plugin 'multicursor'
+3. enable the MultiCursor plugin in the preferences dialog.
+
+4. If you see something like this in your console output:
+
+        (gedit:4579): libpeas-WARNING **: Could not find loader 'python3' for plugin 'multicursor'
     
-Edit the second line of multicursor.plugin to read as follows:
+    Edit the second line of multicursor.plugin to read as follows:
 
-    Loader=python
+        Loader=python
     
-Then re-run install.sh and try again from there.
-
-Configuration
-=============
-
-There's no configuration UI yet, but it would be great if someone handier than me with Gtk would write one! Sorry if you liked using **Control-d** to delete a line, but it should be pretty easy to change if you want to. You can change the keyboard shortcuts by editing the strings at the top of multicursor.py.
+    Then re-run install.sh and try again from there.
 
 Usage
 =====
@@ -43,12 +42,16 @@ If you want to match the selection without case sensitivity, use **Control-Shift
 
 Use **Control-Up** and **Control-Down** to select text above and below the current selection. This allows you to quickly select text in columns, like tabular data or repetitive lines of code.
 
-You can also add cursors anywhere by clicking while holding down the **Control** key.
+You can also add cursors anywhere by clicking while holding down the **Control** key (not working on all systems).
 
 If you have different text selected with multiple cursors, you can use cut/copy/paste and each cursor will maintain its own clipboard, which can be used along with cursor movement commands (like Control-Left, Control-Right, Home, End, and so on) to do some fairly complex refactoring jobs.
 
 Use **Escape** or click anywhere to return to just the normal cursor.
 
+Configuration
+=============
+
+There's no configuration UI yet, but it would be great if someone handier than me with Gtk would write one! Sorry if you liked using **Control-d** to delete a line, but it should be pretty easy to change if you want to. You can change the keyboard shortcuts by editing the strings at the top of multicursor.py.
 
 Shortcomings
 ============

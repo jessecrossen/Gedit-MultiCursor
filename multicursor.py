@@ -110,7 +110,7 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
     return False
 
   def on_key_press(self, view, event):
-    keyval = Gdk.keyval_to_lower(event.keyval)
+    _, keyval, _, _, _ = Gdk.Keymap.get_default().translate_keyboard_state(event.hardware_keycode, event.state, 0)
     mask = Gtk.accelerator_get_default_mod_mask() & event.state
     for shortcut in self.keymap.values():
       if ((shortcut['accel'][0] == keyval) and 

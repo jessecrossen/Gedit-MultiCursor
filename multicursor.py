@@ -110,7 +110,7 @@ class MultiCursor(GObject.Object, Gedit.ViewActivatable):
     return False
 
   def on_key_press(self, view, event):
-    keyval = Gdk.keyval_to_lower(event.keyval)
+    _, keyval, _, _, _ = Gdk.Keymap.get_default().translate_keyboard_state(event.hardware_keycode, event.state, 0)
     mask = Gtk.accelerator_get_default_mod_mask() & event.state
     for shortcut in self.keymap.values():
       if ((shortcut['accel'][0] == keyval) and 
@@ -529,10 +529,17 @@ class Cursor:
         self.move_iter(start_iter, step_size, count)
     # collapse the selection if there is one and the insertion point moves
     elif (end_iter.get_offset() != start_iter.get_offset()):
-      if (count < 0):
-        end_iter = start_iter.copy()
+      ch = ord(start_iter.get_char())
+      if ch >= 0x600 and ch <= 0x6ff:
+        if (count > 0):
+          end_iter = start_iter.copy()
+        else:
+          start_iter = end_iter.copy()
       else:
-        start_iter = end_iter.copy()
+        if (count < 0):
+          end_iter = start_iter.copy()
+        else:
+          start_iter = end_iter.copy()
       if ((step_size != Gtk.MovementStep.LOGICAL_POSITIONS) and
           (step_size != Gtk.MovementStep.VISUAL_POSITIONS)):
         self.move_iter(start_iter, step_size, count)
@@ -543,20 +550,84 @@ class Cursor:
     # update the tag
     self.tag.move_marks(start_iter, end_iter)
 
+  def is_letter(self, ch):
+    return (ch >= ord('a') and ch <= ord('z')) or (ch >= ord('A') and ch <= ord('Z')) or (ch >= 0x600 and ch <= 0x6ff) or ch == ord('_')
+
+  def is_space(self, ch):
+    return ch == ord(' ') or ch == ord('\t') or ch == ord('\r') or ch == ord('\n')
+
+  def is_word_boundary(self, ch1, ch2):
+    if self.is_space(ch2) and not self.is_space(ch1): return True
+    elif self.is_space(ch1) and not self.is_space(ch2): return False
+    elif self.is_letter(ch1) and not self.is_letter(ch2): return True
+    elif self.is_letter(ch2) and not self.is_letter(ch1): return True
+    else: return False
+
+  def move_word_forward(self, pos):
+    ch1 = ord(pos.get_char())
+    pos.forward_char()
+    if pos.is_end(): return
+    ch2 = ord(pos.get_char())
+    while not self.is_word_boundary(ch1, ch2):
+      pos.forward_char()
+      if pos.is_end(): return
+      ch1 = ch2
+      ch2 = ord(pos.get_char())
+    
+  def move_word_backward(self, pos):
+    pos.backward_char()
+    if pos.is_start(): return
+    ch1 = ord(pos.get_char())
+    pos.backward_char()
+    if pos.is_start(): return
+    ch2 = ord(pos.get_char())
+    while not self.is_word_boundary(ch1, ch2):
+      pos.backward_char()
+      if pos.is_start(): return
+      ch1 = ch2
+      ch2 = ord(pos.get_char())
+    pos.forward_char()
+
   # move an iter according to the kind of params we get from a 
   #  'cursor-move' signal from the view
   def move_iter(self, pos, step_size, count):
-    if ((step_size == Gtk.MovementStep.LOGICAL_POSITIONS) or
-        (step_size == Gtk.MovementStep.VISUAL_POSITIONS)):
+    if step_size == Gtk.MovementStep.LOGICAL_POSITIONS:
       if (count < 0):
-        pos.backward_chars(abs(count))
+        pos.backward_cursor_positions(abs(count))
       else:
-        pos.forward_chars(abs(count))
+        pos.forward_cursor_positions(abs(count))
+    elif step_size == Gtk.MovementStep.VISUAL_POSITIONS:
+      startOfLine = pos.copy()
+      startOfLine.set_line_offset(0)
+      endOfLine = startOfLine.copy()
+      endOfLine.forward_line()
+      lineText = pos.get_buffer().get_text(startOfLine, endOfLine, True)
+      pangoLayout = self.view.create_pango_layout(lineText)
+      newLineIndex,_ = pangoLayout.move_cursor_visually(True, pos.get_line_index(), 0, count)
+      if newLineIndex >= 0:
+        pos.set_line_index(newLineIndex)
     elif (step_size == Gtk.MovementStep.WORDS):
-      if (count < 0):
-        pos.backward_word_starts(abs(count))
+      startOfLine = pos.copy()
+      startOfLine.set_line_offset(0)
+      isRtl = False
+      while not startOfLine.ends_line():
+        ch = ord(startOfLine.get_char())
+        if ch >= 0x600 and ch <= 0x6ff:
+          isRtl = True
+          break
+        elif (ch >= ord('a') and ch <= ord('z')) or (ch >= ord('A') and ch <= ord('Z')):
+          break
+        startOfLine.forward_char()
+      if isRtl:
+        if (count > 0):
+          for c in range(abs(count)): self.move_word_backward(pos)
+        else:
+          for c in range(abs(count)): self.move_word_forward(pos)
       else:
-        pos.forward_word_ends(abs(count))
+        if (count < 0):
+          for c in range(abs(count)): self.move_word_backward(pos)
+        else:
+          for c in range(abs(count)): self.move_word_forward(pos)
     elif (step_size == Gtk.MovementStep.DISPLAY_LINES):
       if (self.line_offset is None):
         self.line_offset = pos.get_line_offset()
